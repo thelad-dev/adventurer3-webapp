@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#121416">
+    <title>Adventurer 3 · Bresser REX</title>
+    <link rel="stylesheet" href="/static/app.css">
+    <script type="module" src="/static/app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#inhalt">Zum Inhalt</a>
+    <header class="top">
+      <div>
+        <p class="kicker">FlashForge · LAN</p>
+        <h1 id="machine-name">Adventurer 3</h1>
+        <p class="sub" id="machine-meta">verbindet …</p>
+      </div>
+      <p class="status-pill" id="status-pill" aria-live="polite">offline</p>
+    </header>
+    <main id="inhalt" tabindex="-1">
+      <div class="layout">
+        <figure class="camera-card">
+          <figcaption>Kamera</figcaption>
+          <div class="camera-frame">
+            <img id="camera" width="640" height="480" alt="Livebild der Druckerkamera" fetchpriority="high">
+            <p class="camera-fallback" id="camera-fallback" hidden>Kein Kamerabild auf Port 8080.</p>
+          </div>
+        </figure>
+        <section class="temps" aria-labelledby="temps-title">
+          <h2 id="temps-title">Temperatur</h2>
+          <div class="temp-grid">
+            <article>
+              <h3>Düse</h3>
+              <p class="readout"><output id="nozzle-now">–</output><span>°C</span></p>
+              <p class="target">Ziel <output id="nozzle-want">–</output> °C</p>
+              <form id="form-nozzle">
+                <label for="nozzle-input">Düse setzen</label>
+                <div class="inline">
+                  <input id="nozzle-input" name="nozzle" type="number" min="0" max="265" step="1" inputmode="numeric" value="0">
+                  <button type="submit">Setzen</button>
+                </div>
+              </form>
+            </article>
+            <article>
+              <h3>Bett</h3>
+              <p class="readout cool"><output id="bed-now">–</output><span>°C</span></p>
+              <p class="target">Ziel <output id="bed-want">–</output> °C</p>
+              <form id="form-bed">
+                <label for="bed-input">Bett setzen</label>
+                <div class="inline">
+                  <input id="bed-input" name="bed" type="number" min="0" max="120" step="1" inputmode="numeric" value="0">
+                  <button type="submit">Setzen</button>
+                </div>
+              </form>
+            </article>
+          </div>
+          <p class="file-line">Datei: <output id="current-file">–</output></p>
+          <label class="progress-label" for="print-progress">Fortschritt</label>
+          <progress id="print-progress" max="100"></progress>
+          <p class="progress-text"><output id="progress-text">–</output></p>
+        </section>
+      </div>
+
+      <section class="controls" aria-labelledby="job-title">
+        <h2 id="job-title">Druckauftrag</h2>
+        <div class="button-row">
+          <button type="button" id="btn-pause">Pause</button>
+          <button type="button" id="btn-resume">Weiter</button>
+          <button type="button" id="btn-stop" class="danger">Stopp</button>
+        </div>
+      </section>
+
+      <section class="controls" aria-labelledby="move-title">
+        <h2 id="move-title">Verfahren</h2>
+        <p class="coords">X <output id="pos-x">–</output> · Y <output id="pos-y">–</output> · Z <output id="pos-z">–</output></p>
+        <fieldset class="step">
+          <legend>Schritt</legend>
+          <label><input type="radio" name="step" value="0.1"> 0,1 mm</label>
+          <label><input type="radio" name="step" value="1" checked> 1 mm</label>
+          <label><input type="radio" name="step" value="10"> 10 mm</label>
+        </fieldset>
+        <div class="jog" role="group" aria-label="Achsen">
+          <button type="button" data-axis="Y" data-dir="1">Y+</button>
+          <button type="button" data-axis="X" data-dir="-1">X−</button>
+          <button type="button" id="btn-home">Home</button>
+          <button type="button" data-axis="X" data-dir="1">X+</button>
+          <button type="button" data-axis="Y" data-dir="-1">Y−</button>
+          <button type="button" data-axis="Z" data-dir="1">Z+</button>
+          <button type="button" data-axis="Z" data-dir="-1">Z−</button>
+        </div>
+        <p class="hint">Verfahren und Home sind während eines Drucks gesperrt.</p>
+      </section>
+
+      <section class="controls" aria-labelledby="aux-title">
+        <h2 id="aux-title">Licht, Lüfter, Motoren</h2>
+        <div class="button-row">
+          <button type="button" id="btn-led-on">LED an</button>
+          <button type="button" id="btn-led-off">LED aus</button>
+          <button type="button" id="btn-fan-on">Lüfter an</button>
+          <button type="button" id="btn-fan-off">Lüfter aus</button>
+          <button type="button" id="btn-motors-on">Motoren an</button>
+          <button type="button" id="btn-motors-off">Motoren aus</button>
+        </div>
+      </section>
+
+      <section class="files" aria-labelledby="files-title">
+        <div class="files-head">
+          <h2 id="files-title">Dateien auf dem Drucker</h2>
+          <button type="button" id="btn-refresh-files">Liste laden</button>
+        </div>
+        <ul id="file-list" role="list"></ul>
+      </section>
+
+      <section class="raw" aria-labelledby="raw-title">
+        <h2 id="raw-title">Rohkommando</h2>
+        <form id="form-raw">
+          <label for="raw-input">G- oder M-Kommando</label>
+          <div class="inline">
+            <input id="raw-input" name="command" spellcheck="false" placeholder="M119" autocomplete="off">
+            <button type="submit">Senden</button>
+          </div>
+        </form>
+        <pre id="log" aria-label="Antworten"></pre>
+      </section>
+    </main>
+    <footer>
+      <p>Nur LAN. Standardbindung 127.0.0.1, Drucker 192.168.20.191:8899.</p>
+    </footer>
+    <dialog id="confirm-stop" aria-labelledby="confirm-stop-title">
+      <h2 id="confirm-stop-title">Druck wirklich abbrechen?</h2>
+      <p>Stopp beendet den Auftrag. Ein Fortsetzen ist danach nicht möglich.</p>
+      <form method="dialog">
+        <button value="cancel">Abbrechen</button>
+        <button value="ok" class="danger">Stopp</button>
+      </form>
+    </dialog>
+    <dialog id="confirm-print" aria-labelledby="confirm-print-title">
+      <h2 id="confirm-print-title">Datei starten?</h2>
+      <p>Es wird gedruckt: <strong id="confirm-print-name"></strong></p>
+      <form method="dialog">
+        <button value="cancel">Abbrechen</button>
+        <button value="ok">Start</button>
+      </form>
+    </dialog>
+  </body>
+</html>
