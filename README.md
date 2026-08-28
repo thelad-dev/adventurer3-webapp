@@ -49,7 +49,7 @@ docker compose up --build -d
 
 Die Compose-Datei bindet `0.0.0.0:8765` im Container und veröffentlicht Port 8765 auf dem Host.
 
-Auf Host `dock` (192.168.88.3): <http://192.168.88.3:8765>
+Auf Host `dock` (192.168.88.3) liegt der Stack unter `~/adventurer3-webapp` und ist erreichbar unter <http://192.168.88.3:8765>.
 
 ## Protokoll
 
