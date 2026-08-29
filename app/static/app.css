@@ -165,7 +165,23 @@ main {
   margin: 0.2rem 0 0.6rem;
 }
 
+.hold {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.hold input {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--heat);
+}
+
 label, legend { font-size: 0.8rem; color: var(--muted); }
+label.hold { font-size: 0.95rem; color: var(--text); }
 
 .inline { display: flex; gap: 0.4rem; margin-top: 0.25rem; }
 .inline input { flex: 1; }

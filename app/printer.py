@@ -73,6 +73,7 @@ class Snapshot:
     progress_total: int | None = None
     printing: bool = False
     paused: bool = False
+    fan_hold_off: bool = False
     error: str = ""
     updated_at: float = 0.0
     extra: dict[str, str] = field(default_factory=dict)
@@ -165,6 +166,14 @@ def parse_progress(text: str, snap: Snapshot) -> None:
         return
     snap.progress_current = int(match.group(1))
     snap.progress_total = int(match.group(2))
+
+
+def pulse_fan_hold_off(enabled: bool, send_off) -> bool:
+    """Genau ein Aus-Puls, und nur wenn der Halt aktiv ist."""
+    if not enabled:
+        return False
+    send_off()
+    return True
 
 
 def parse_files(text: str) -> list[str]:
@@ -367,7 +376,17 @@ class PrinterClient:
         return self.control_command("~M146 r0 g0 b0 F0")
 
     def set_fan(self, on: bool) -> str:
+        if on:
+            self.snapshot.fan_hold_off = False
         return self.control_command("~M106" if on else "~M107")
+
+    def set_fan_hold_off(self, on: bool) -> str:
+        if not on:
+            self.snapshot.fan_hold_off = False
+            return "Lüfter-Dauer-Aus inaktiv"
+        reply = self.set_fan(False)
+        self.snapshot.fan_hold_off = True
+        return reply
 
     def set_motors(self, on: bool) -> str:
         return self.control_command("~M17" if on else "~M18")
@@ -490,7 +509,17 @@ class MockPrinterClient:
         return self._reply("M146")
 
     def set_fan(self, on: bool) -> str:
+        if on:
+            self.snapshot.fan_hold_off = False
         return self._reply("M106" if on else "M107")
+
+    def set_fan_hold_off(self, on: bool) -> str:
+        if not on:
+            self.snapshot.fan_hold_off = False
+            return "Lüfter-Dauer-Aus inaktiv"
+        reply = self.set_fan(False)
+        self.snapshot.fan_hold_off = True
+        return reply
 
     def set_motors(self, on: bool) -> str:
         return self._reply("M17" if on else "M18")

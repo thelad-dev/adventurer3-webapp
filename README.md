@@ -56,6 +56,7 @@ Auf Host `dock` (192.168.88.3) liegt der Stack unter `~/adventurer3-webapp` und 
 - TCP `~M601 S1` Sitzung, danach `~M115` / `~M105` / `~M119` / `~M114` / `~M27`
 - Dateiliste `~M661` (Nutzdaten kommen nach `ok`)
 - Druckstart `~M23` plus `~M24`, Pause `~M25`, Weiter `~M24`, Stopp `~M26`
+- Lüfter aus `~M107`; Option „Lüfter ausgeschaltet lassen“ wiederholt das 1×/s (Default aus)
 - Kamera oft `http://<drucker>:8080/?action=stream`
 
 Quellen, nicht neu erfunden: [Parallel-7/flashforge-api-docs](https://github.com/Parallel-7/flashforge-api-docs), [Slugger2k/FlashForgePrinterApi](https://github.com/Slugger2k/FlashForgePrinterApi), [andycb/AdventurerClientJS](https://github.com/andycb/AdventurerClientJS), [modrzew/hass-flashforge-adventurer-3](https://github.com/modrzew/hass-flashforge-adventurer-3).

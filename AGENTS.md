@@ -12,6 +12,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - Dateiliste `~M661`: Dateinamen kommen nach `ok`, extra Drain in `list_files`.
 - Kamera-Proxy: `http://<drucker>:8080/?action=stream` über `/api/camera`.
 - `PRINTER_MOCK=1` für UI ohne physischen Drucker. Kein Firmware-Flash.
+- „Lüfter ausgeschaltet lassen“: Server sendet `~M107` 1×/s, Default aus. Siehe `fan_hold_loop` in `app/server.py`.
 - Default-Drucker `192.168.20.191`. Deploy-Port auf Host `dock`: 8765.
 
 ## Maintaining this file

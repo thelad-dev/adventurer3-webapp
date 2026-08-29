@@ -14,6 +14,7 @@ from app.printer import (  # noqa: E402
     parse_progress,
     parse_status,
     parse_temps,
+    pulse_fan_hold_off,
     sanitize_print_name,
     validate_raw,
 )
@@ -139,6 +140,25 @@ class ParseTests(unittest.TestCase):
         self.assertTrue(client.snapshot.paused)
         client.start_print("demo-cube.gx")
         self.assertEqual(client.snapshot.current_file, "demo-cube.gx")
+
+    def test_fan_hold_default_off(self):
+        self.assertFalse(Snapshot().fan_hold_off)
+        self.assertFalse(MockPrinterClient().snapshot.fan_hold_off)
+
+    def test_fan_hold_pulses_only_when_enabled(self):
+        sent = []
+        self.assertFalse(pulse_fan_hold_off(False, lambda: sent.append("M107")))
+        self.assertEqual(sent, [])
+        self.assertTrue(pulse_fan_hold_off(True, lambda: sent.append("M107")))
+        self.assertEqual(sent, ["M107"])
+
+    def test_mock_fan_hold_sends_off(self):
+        client = MockPrinterClient()
+        reply = client.set_fan_hold_off(True)
+        self.assertTrue(client.snapshot.fan_hold_off)
+        self.assertIn("M107", reply)
+        client.set_fan(True)
+        self.assertFalse(client.snapshot.fan_hold_off)
 
     def test_readonly_blocks_mock_writes(self):
         old = config.PRINTER_READONLY

@@ -15,7 +15,14 @@ from typing import Any
 from urllib.parse import urlparse
 
 from . import config
-from .printer import MockPrinterClient, PrinterClient, Snapshot, build_client, validate_raw
+from .printer import (
+    MockPrinterClient,
+    PrinterClient,
+    Snapshot,
+    build_client,
+    pulse_fan_hold_off,
+    validate_raw,
+)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 MIME = {
@@ -182,6 +189,8 @@ class Handler(BaseHTTPRequestHandler):
             return printer.set_led(bool(body.get("on")))
         if path == "/api/fan":
             return printer.set_fan(bool(body.get("on")))
+        if path == "/api/fan-hold":
+            return printer.set_fan_hold_off(bool(body.get("on")))
         if path == "/api/motors":
             return printer.set_motors(bool(body.get("on")))
         if path == "/api/temps":
@@ -310,6 +319,20 @@ def poll_loop() -> None:
         stop_event.wait(config.POLL_INTERVAL)
 
 
+def fan_hold_loop() -> None:
+    assert printer is not None
+    while not stop_event.is_set():
+        started = time.monotonic()
+        holding = bool(printer.snapshot.fan_hold_off)
+        if holding:
+            try:
+                pulse_fan_hold_off(True, lambda: printer.set_fan(False))
+            except (OSError, ValueError):
+                pass
+        remaining = (1.0 if holding else 0.2) - (time.monotonic() - started)
+        stop_event.wait(max(0.05, remaining))
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Adventurer-3-Webapp")
     parser.add_argument("--bind", default=config.BIND, help="Bind-Adresse, Standard 127.0.0.1")
@@ -330,6 +353,8 @@ def main(argv: list[str] | None = None) -> None:
     camera_ok = False if config.PRINTER_MOCK else camera_probe(args.printer, config.CAMERA_PORT)
     worker = threading.Thread(target=poll_loop, name="printer-poll", daemon=True)
     worker.start()
+    holder = threading.Thread(target=fan_hold_loop, name="fan-hold", daemon=True)
+    holder.start()
     httpd = QuietHTTPServer((args.bind, args.port), Handler)
     mode = "Mock" if config.PRINTER_MOCK else f"Drucker {args.printer}:{args.printer_port}"
     print(f"Adventurer-3-Webapp auf http://{args.bind}:{args.port} ({mode})", flush=True)

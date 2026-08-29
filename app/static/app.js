@@ -75,6 +75,10 @@ function render(status) {
     setText("progress-text", `${status.progress_pct} %`);
   }
   busy(Boolean(status.printing));
+  const hold = $("fan-hold-off");
+  if (hold && hold.checked !== Boolean(status.fan_hold_off)) {
+    hold.checked = Boolean(status.fan_hold_off);
+  }
 }
 
 async function post(path, payload = {}) {
@@ -243,6 +247,15 @@ function boot() {
     }
   });
   $("btn-refresh-files").addEventListener("click", loadFiles);
+  $("fan-hold-off").addEventListener("change", async (event) => {
+    const box = event.currentTarget;
+    try {
+      await post("/api/fan-hold", { on: box.checked });
+    } catch (err) {
+      box.checked = false;
+      log(String(err.message || err));
+    }
+  });
 
   if ("EventSource" in window) connectEvents();
   else pollOnce();
