@@ -15,7 +15,9 @@ from typing import Any
 from urllib.parse import urlparse
 
 from . import config
+from .mqtt import MqttPublisher
 from .printer import (
+    FLASHPRINT_BUSY,
     MockPrinterClient,
     PrinterClient,
     Snapshot,
@@ -36,6 +38,55 @@ MIME = {
 printer: PrinterClient | MockPrinterClient | None = None
 stop_event = threading.Event()
 camera_ok = False
+mqtt_pub = MqttPublisher()
+_mode_lock = threading.Lock()
+_control_mode = config.CONTROL_DASHBOARD
+
+
+def control_mode() -> str:
+    return _control_mode
+
+
+def load_control_mode() -> str:
+    global _control_mode
+    path = Path(config.CONTROL_MODE_FILE)
+    try:
+        raw = path.read_text(encoding="utf-8").strip().lower()
+    except OSError:
+        raw = config.CONTROL_DASHBOARD
+    if raw not in {config.CONTROL_DASHBOARD, config.CONTROL_FLASHPRINT}:
+        raw = config.CONTROL_DASHBOARD
+    with _mode_lock:
+        _control_mode = raw
+    return raw
+
+
+def persist_control_mode(mode: str) -> None:
+    global _control_mode
+    with _mode_lock:
+        _control_mode = mode
+        path = Path(config.CONTROL_MODE_FILE)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_text(mode + "\n", encoding="utf-8")
+            tmp.replace(path)
+        except OSError:
+            pass
+
+
+def apply_control_mode(mode: str) -> str:
+    if mode not in {config.CONTROL_DASHBOARD, config.CONTROL_FLASHPRINT}:
+        raise ValueError("Modus muss dashboard oder flashprint sein.")
+    assert printer is not None
+    if mode == config.CONTROL_FLASHPRINT:
+        printer.yield_to_flashprint()
+        persist_control_mode(mode)
+    else:
+        persist_control_mode(mode)
+        printer.reclaim()
+        printer.poll(full=True)
+    return mode
 
 
 def snapshot() -> Snapshot:
@@ -133,6 +184,7 @@ class Handler(BaseHTTPRequestHandler):
                     "camera": camera_ok,
                     "mock": config.PRINTER_MOCK,
                     "readonly": config.PRINTER_READONLY,
+                    "control_mode": control_mode(),
                 }
             )
             return
@@ -142,6 +194,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/files":
             try:
                 assert printer is not None
+                if printer.is_yielded():
+                    self._json({"error": FLASHPRINT_BUSY}, 409)
+                    return
                 self._json({"files": printer.list_files()})
             except (OSError, ValueError) as exc:
                 self._json({"error": str(exc)}, 502)
@@ -150,7 +205,10 @@ class Handler(BaseHTTPRequestHandler):
             self._sse()
             return
         if path == "/api/camera":
-            self._camera()
+            self._camera(config.PRINTER_HOST, config.CAMERA_PORT, "/?action=stream")
+            return
+        if path == "/api/camera-ad3":
+            self._camera("192.168.88.88", 8080, "/stream")
             return
         self._send(404, b"Not found\n", "text/plain; charset=utf-8")
 
@@ -168,7 +226,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": str(exc)}, 400)
             return
         except OSError as exc:
-            self._json({"error": str(exc)}, 502)
+            status = 409 if printer is not None and printer.is_yielded() else 502
+            self._json({"error": str(exc)}, status)
             return
         if reply is None:
             self._json({"error": "Unbekannte Aktion"}, 404)
@@ -177,6 +236,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _dispatch_post(self, path: str, body: dict[str, Any]) -> str | None:
         assert printer is not None
+        if path == "/api/control-mode":
+            mode = str(body.get("mode", "")).strip().lower()
+            apply_control_mode(mode)
+            return f"Modus {mode}"
+        if printer.is_yielded():
+            raise OSError(FLASHPRINT_BUSY)
         if path == "/api/pause":
             return printer.pause()
         if path == "/api/resume":
@@ -217,7 +282,11 @@ class Handler(BaseHTTPRequestHandler):
         ctype = MIME.get(candidate.suffix, "application/octet-stream")
         extra = {}
         if candidate.suffix == ".html":
-            extra["Content-Security-Policy"] = "default-src 'self'; img-src 'self' blob:; connect-src 'self'"
+            extra["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "img-src 'self' blob: http://192.168.88.88:8080; "
+                "connect-src 'self'"
+            )
         self._send(200, data, ctype, extra)
 
     def _sse(self) -> None:
@@ -244,9 +313,7 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
             return
 
-    def _camera(self) -> None:
-        host = config.PRINTER_HOST
-        port = config.CAMERA_PORT
+    def _camera(self, host: str, port: int, req_path: str) -> None:
         upstream = None
         headers_sent = False
         self.timeout = None
@@ -257,8 +324,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             upstream = socket.create_connection((host, port), timeout=4)
             upstream.settimeout(8)
+            path = req_path if req_path.startswith("/") else "/" + req_path
             request = (
-                b"GET /?action=stream HTTP/1.0\r\n"
+                f"GET {path} HTTP/1.0\r\n".encode()
                 + f"Host: {host}:{port}\r\n".encode()
                 + b"Accept: multipart/x-mixed-replace,image/jpeg,*/*\r\n"
                 + b"Connection: close\r\n\r\n"
@@ -314,7 +382,15 @@ def poll_loop() -> None:
     assert printer is not None
     cycle = 0
     while not stop_event.is_set():
+        if printer.is_yielded():
+            stop_event.wait(config.POLL_INTERVAL)
+            continue
         printer.poll(full=cycle % 20 == 0)
+        mqtt_pub.publish_state(
+            printer.snapshot.to_json(),
+            camera_ok=camera_ok,
+            control_mode=control_mode(),
+        )
         cycle += 1
         stop_event.wait(config.POLL_INTERVAL)
 
@@ -323,7 +399,7 @@ def fan_hold_loop() -> None:
     assert printer is not None
     while not stop_event.is_set():
         started = time.monotonic()
-        holding = bool(printer.snapshot.fan_hold_off)
+        holding = bool(printer.snapshot.fan_hold_off) and not printer.is_yielded()
         if holding:
             try:
                 pulse_fan_hold_off(True, lambda: printer.set_fan(False))
@@ -350,11 +426,14 @@ def main(argv: list[str] | None = None) -> None:
     config.PRINTER_HOST = args.printer
     config.PRINTER_PORT = args.printer_port
     printer = build_client(args.printer, args.printer_port)
+    if load_control_mode() == config.CONTROL_FLASHPRINT:
+        printer.yield_to_flashprint()
     camera_ok = False if config.PRINTER_MOCK else camera_probe(args.printer, config.CAMERA_PORT)
     worker = threading.Thread(target=poll_loop, name="printer-poll", daemon=True)
     worker.start()
     holder = threading.Thread(target=fan_hold_loop, name="fan-hold", daemon=True)
     holder.start()
+    mqtt_pub.start()
     httpd = QuietHTTPServer((args.bind, args.port), Handler)
     mode = "Mock" if config.PRINTER_MOCK else f"Drucker {args.printer}:{args.printer_port}"
     print(f"Adventurer-3-Webapp auf http://{args.bind}:{args.port} ({mode})", flush=True)
@@ -364,5 +443,6 @@ def main(argv: list[str] | None = None) -> None:
         print("Beende …", flush=True)
     finally:
         stop_event.set()
+        mqtt_pub.stop()
         httpd.server_close()
         printer.close()

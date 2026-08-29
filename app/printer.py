@@ -37,6 +37,7 @@ PROGRESS_RE = re.compile(r"byte\s+(\d+)\s*/\s*(\d+)", re.IGNORECASE)
 FILE_RE = re.compile(r"/data/([^:\x00-\x1f]+?\.(?:gx|gcode|g))\b", re.IGNORECASE)
 FIELD_RE = re.compile(r"^(Machine Type|Machine Name|Firmware|SN|Tool Count|Mac Address|Endstop|MachineStatus|MoveMode|Status|LED|CurrentFile|PrintFileName)\s*:\s*(.*)$", re.IGNORECASE)
 RAW_CMD_RE = re.compile(r"^~?[GM]\d{1,3}(?:\s+\S.*)?$", re.IGNORECASE)
+FLASHPRINT_BUSY = "FlashPrint-Modus: Port 8899 ist freigegeben."
 
 PRINTING_STATUSES = {
     "BUILDING",
@@ -74,6 +75,7 @@ class Snapshot:
     printing: bool = False
     paused: bool = False
     fan_hold_off: bool = False
+    control_mode: str = "dashboard"
     error: str = ""
     updated_at: float = 0.0
     extra: dict[str, str] = field(default_factory=dict)
@@ -207,12 +209,42 @@ class PrinterClient:
         self.port = port
         self._lock = threading.Lock()
         self._sock: socket.socket | None = None
+        self._flashprint = threading.Event()
         self.snapshot = Snapshot()
         self.last_raw: dict[str, str] = {}
 
     def close(self) -> None:
         with self._lock:
             self._close_unlocked()
+
+    def is_yielded(self) -> bool:
+        return self._flashprint.is_set()
+
+    def yield_to_flashprint(self) -> None:
+        self._flashprint.set()
+        sock = self._sock
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        with self._lock:
+            self._close_unlocked()
+            self._mark_flashprint_unlocked()
+
+    def reclaim(self) -> None:
+        self._flashprint.clear()
+        with self._lock:
+            self.snapshot.control_mode = config.CONTROL_DASHBOARD
+            self.snapshot.error = ""
+            self.snapshot.updated_at = time.time()
+
+    def _mark_flashprint_unlocked(self) -> None:
+        self.snapshot.online = False
+        self.snapshot.control = False
+        self.snapshot.control_mode = config.CONTROL_FLASHPRINT
+        self.snapshot.error = ""
+        self.snapshot.updated_at = time.time()
 
     def _close_unlocked(self) -> None:
         if self._sock is not None:
@@ -223,8 +255,16 @@ class PrinterClient:
             self._sock = None
 
     def _connect_unlocked(self) -> None:
+        if self._flashprint.is_set():
+            raise OSError(FLASHPRINT_BUSY)
         self._close_unlocked()
         sock = socket.create_connection((self.host, self.port), timeout=8)
+        if self._flashprint.is_set():
+            try:
+                sock.close()
+            except OSError:
+                pass
+            raise OSError(FLASHPRINT_BUSY)
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self._sock = sock
         self.snapshot.online = True
@@ -263,6 +303,9 @@ class PrinterClient:
     def _command_unlocked(self, command: str, drain_after_ok: float = 0.05) -> str:
         last_error: OSError | None = None
         for attempt in range(2):
+            if self._flashprint.is_set():
+                self._mark_flashprint_unlocked()
+                raise OSError(FLASHPRINT_BUSY)
             try:
                 if self._sock is None:
                     self._connect_unlocked()
@@ -271,6 +314,9 @@ class PrinterClient:
                 last_error = exc
                 self._close_unlocked()
                 self.snapshot.online = False
+                if self._flashprint.is_set():
+                    self._mark_flashprint_unlocked()
+                    raise OSError(FLASHPRINT_BUSY) from exc
                 if attempt == 0:
                     continue
         self.snapshot.error = str(last_error) if last_error else "Unbekannter Fehler"
@@ -290,6 +336,9 @@ class PrinterClient:
         with self._lock:
             last_error: OSError | None = None
             for attempt in range(2):
+                if self._flashprint.is_set():
+                    self._mark_flashprint_unlocked()
+                    raise OSError(FLASHPRINT_BUSY)
                 try:
                     if self._sock is None:
                         self._connect_unlocked()
@@ -299,12 +348,20 @@ class PrinterClient:
                     last_error = exc
                     self._close_unlocked()
                     self.snapshot.online = False
+                    if self._flashprint.is_set():
+                        self._mark_flashprint_unlocked()
+                        raise OSError(FLASHPRINT_BUSY) from exc
                     if attempt == 0:
                         continue
             self.snapshot.error = str(last_error) if last_error else "Unbekannter Fehler"
             raise OSError(self.snapshot.error)
 
     def poll(self, full: bool = False) -> Snapshot:
+        if self._flashprint.is_set():
+            with self._lock:
+                self._close_unlocked()
+                self._mark_flashprint_unlocked()
+            return self.snapshot
         try:
             if full or not self.snapshot.machine_type:
                 info = self.command(CMD_INFO)
@@ -326,11 +383,17 @@ class PrinterClient:
             self.snapshot.error = ""
         except OSError as exc:
             self.snapshot.online = False
-            self.snapshot.error = str(exc)
+            if self._flashprint.is_set():
+                self.snapshot.control_mode = config.CONTROL_FLASHPRINT
+                self.snapshot.error = ""
+            else:
+                self.snapshot.error = str(exc)
         self.snapshot.updated_at = time.time()
         return self.snapshot
 
     def list_files(self) -> list[str]:
+        if self._flashprint.is_set():
+            raise OSError(FLASHPRINT_BUSY)
         raw = self.command(CMD_FILES, drain_after_ok=1.2)
         self.last_raw["M661"] = raw
         return parse_files(raw)
@@ -425,6 +488,7 @@ class MockPrinterClient:
     def __init__(self) -> None:
         self.host = "mock"
         self.port = 0
+        self._flashprint = threading.Event()
         self.last_raw: dict[str, str] = {}
         self.snapshot = Snapshot(
             online=True,
@@ -452,14 +516,40 @@ class MockPrinterClient:
     def close(self) -> None:
         return
 
+    def is_yielded(self) -> bool:
+        return self._flashprint.is_set()
+
+    def yield_to_flashprint(self) -> None:
+        self._flashprint.set()
+        self.snapshot.online = False
+        self.snapshot.control = False
+        self.snapshot.control_mode = config.CONTROL_FLASHPRINT
+        self.snapshot.error = ""
+        self.snapshot.updated_at = time.time()
+
+    def reclaim(self) -> None:
+        self._flashprint.clear()
+        self.snapshot.online = True
+        self.snapshot.control = True
+        self.snapshot.control_mode = config.CONTROL_DASHBOARD
+        self.snapshot.error = ""
+        self.snapshot.updated_at = time.time()
+
     def poll(self, full: bool = False) -> Snapshot:
+        if self._flashprint.is_set():
+            self.snapshot.online = False
+            self.snapshot.control_mode = config.CONTROL_FLASHPRINT
         self.snapshot.updated_at = time.time()
         return self.snapshot
 
     def list_files(self) -> list[str]:
+        if self._flashprint.is_set():
+            raise OSError(FLASHPRINT_BUSY)
         return ["demo-cube.gx", "NvidiaV100Fan_eABS+HS@245+10%.gx"]
 
     def _reply(self, code: str) -> str:
+        if self._flashprint.is_set():
+            raise OSError(FLASHPRINT_BUSY)
         if config.PRINTER_READONLY:
             raise ValueError("Schreibschutz: Steuerung ist abgeschaltet.")
         return f"CMD {code} Received.\nok"
@@ -532,6 +622,8 @@ class MockPrinterClient:
         return self._reply("M23")
 
     def raw(self, command: str) -> str:
+        if self._flashprint.is_set():
+            raise OSError(FLASHPRINT_BUSY)
         cmd = validate_raw(command)
         return f"CMD {cmd[1:].split()[0]} Received.\nok"
 

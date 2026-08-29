@@ -38,6 +38,14 @@ Umgebung:
 | `POLL_INTERVAL` | `1` | Statusabfrage in Sekunden |
 | `FAN_HOLD_INTERVAL` | `0.7` | Abstand der M107-Pulse bei „Lüfter ausgeschaltet lassen“ |
 | `PRINTER_MOCK` | aus | UI und API ohne physischen Drucker |
+| `MQTT_HOST` | leer | Broker für Home Assistant. Leer = MQTT aus |
+| `MQTT_PORT` | `1883` | MQTT-Port |
+| `MQTT_USERNAME` | leer | Broker-Benutzer |
+| `MQTT_PASSWORD` | leer | Broker-Passwort, nicht ins Git |
+
+## Home Assistant
+
+Bei gesetztem `MQTT_HOST` veröffentlicht die App Discovery unter `homeassistant/+/adventurer3/#` und den Zustand unter `adventurer3/state` (JSON). Verfügbarkeit: `adventurer3/status` (`online`/`offline`). MQTT muss im Broker mit Benutzer/Passwort stehen; die App erscheint danach als Gerät „Adventurer 3“.
 | `PRINTER_READONLY` | aus | Nur Status, keine Steuerkommandos |
 
 Statusabfragen nutzen `~M115` / `~M105` / `~M119` / `~M114` / `~M27`. Sitzungsübernahme `~M601 S1` nur bei Steueraktionen, nicht beim Polling.

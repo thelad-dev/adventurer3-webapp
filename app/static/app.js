@@ -4,6 +4,28 @@ const logEl = $("log");
 const camera = $("camera");
 const cameraFallback = $("camera-fallback");
 let pendingFile = "";
+let controlMode = "dashboard";
+
+function printerControls() {
+  return document.querySelectorAll(
+    ".temps button, .temps input, .controls button, .controls input, .files button, .raw button, .raw input",
+  );
+}
+
+function applyMode(mode) {
+  controlMode = mode === "flashprint" ? "flashprint" : "dashboard";
+  const flash = controlMode === "flashprint";
+  document.body.dataset.control = controlMode;
+  const dashBtn = $("btn-mode-dashboard");
+  const flashBtn = $("btn-mode-flashprint");
+  if (dashBtn) dashBtn.setAttribute("aria-pressed", String(!flash));
+  if (flashBtn) flashBtn.setAttribute("aria-pressed", String(flash));
+  const banner = $("mode-banner");
+  if (banner) banner.hidden = !flash;
+  printerControls().forEach((el) => {
+    el.disabled = flash;
+  });
+}
 
 function log(text) {
   const stamp = new Date().toLocaleTimeString("de-DE");
@@ -41,10 +63,15 @@ function render(status) {
   ].filter(Boolean);
   setText("machine-meta", bits.join(" · "));
 
+  if (status.control_mode) applyMode(status.control_mode);
+
   const pill = $("status-pill");
   let state = "off";
   let label = "offline";
-  if (status.online && status.paused) {
+  if (controlMode === "flashprint") {
+    state = "flashprint";
+    label = "FlashPrint";
+  } else if (status.online && status.paused) {
     state = "pause";
     label = "pause";
   } else if (status.online && status.printing) {
@@ -74,7 +101,7 @@ function render(status) {
     bar.value = status.progress_pct;
     setText("progress-text", `${status.progress_pct} %`);
   }
-  busy(Boolean(status.printing));
+  if (controlMode !== "flashprint") busy(Boolean(status.printing));
   const hold = $("fan-hold-off");
   if (hold && hold.checked !== Boolean(status.fan_hold_off)) {
     hold.checked = Boolean(status.fan_hold_off);
@@ -106,6 +133,18 @@ function bindPost(id, path, payload) {
   });
 }
 
+async function setControlMode(mode) {
+  if (mode === controlMode) {
+    applyMode(mode);
+    return;
+  }
+  try {
+    await post("/api/control-mode", { mode });
+  } catch (err) {
+    log(String(err.message || err));
+  }
+}
+
 async function loadFiles() {
   const list = $("file-list");
   list.replaceChildren();
@@ -129,6 +168,7 @@ async function loadFiles() {
       const button = document.createElement("button");
       button.type = "button";
       button.textContent = "Start";
+      button.disabled = controlMode === "flashprint";
       button.addEventListener("click", () => {
         pendingFile = name;
         $("confirm-print-name").textContent = name;
@@ -170,16 +210,23 @@ async function pollOnce() {
   setTimeout(pollOnce, 2000);
 }
 
+function bindCameraFallback(img, fallback) {
+  if (!img || !fallback) return;
+  img.addEventListener("error", () => {
+    fallback.hidden = false;
+  });
+  img.addEventListener("load", () => {
+    img.hidden = false;
+    fallback.hidden = true;
+  });
+}
+
 function startCamera() {
-  camera.addEventListener("error", () => {
-    camera.hidden = true;
-    cameraFallback.hidden = false;
-  });
-  camera.addEventListener("load", () => {
-    camera.hidden = false;
-    cameraFallback.hidden = true;
-  });
+  bindCameraFallback(camera, cameraFallback);
   camera.src = "/api/camera";
+  const ad3 = $("camera-ad3");
+  bindCameraFallback(ad3, $("camera-ad3-fallback"));
+  if (ad3) ad3.src = "/api/camera-ad3";
 }
 
 function boot() {
@@ -247,6 +294,8 @@ function boot() {
     }
   });
   $("btn-refresh-files").addEventListener("click", loadFiles);
+  $("btn-mode-dashboard").addEventListener("click", () => setControlMode("dashboard"));
+  $("btn-mode-flashprint").addEventListener("click", () => setControlMode("flashprint"));
   $("fan-hold-off").addEventListener("change", async (event) => {
     const box = event.currentTarget;
     try {

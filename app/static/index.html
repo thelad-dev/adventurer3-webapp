@@ -17,8 +17,15 @@
         <h1 id="machine-name">Adventurer 3</h1>
         <p class="sub" id="machine-meta">verbindet …</p>
       </div>
-      <p class="status-pill" id="status-pill" aria-live="polite">offline</p>
+      <div class="top-actions">
+        <div class="mode-switch" role="group" aria-label="Druckerzugriff">
+          <button type="button" id="btn-mode-dashboard" aria-pressed="true">Dashboard</button>
+          <button type="button" id="btn-mode-flashprint" aria-pressed="false">FlashPrint</button>
+        </div>
+        <p class="status-pill" id="status-pill" aria-live="polite">offline</p>
+      </div>
     </header>
+    <p class="mode-banner" id="mode-banner" hidden role="status">Drucker-Steuerung pausiert. FlashPrint darf jetzt auf Port 8899 verbinden. Kameras laufen weiter.</p>
     <main id="inhalt" tabindex="-1">
       <div class="layout">
         <figure class="camera-card">
@@ -26,6 +33,18 @@
           <div class="camera-frame">
             <img id="camera" width="640" height="480" alt="Livebild der Druckerkamera" fetchpriority="high">
             <p class="camera-fallback" id="camera-fallback" hidden>Kein Kamerabild auf Port 8080.</p>
+          </div>
+        </figure>
+        <figure class="camera-card">
+          <figcaption>AD3 Cam</figcaption>
+          <div class="camera-frame camera-frame--wide">
+            <img
+              id="camera-ad3"
+              alt="AD3 Cam"
+              width="1280"
+              height="720"
+            >
+            <p class="camera-fallback" id="camera-ad3-fallback" hidden>Kein Kamerabild unter 192.168.88.88:8080.</p>
           </div>
         </figure>
         <section class="temps" aria-labelledby="temps-title">
