@@ -141,6 +141,9 @@ class ParseTests(unittest.TestCase):
         client.start_print("demo-cube.gx")
         self.assertEqual(client.snapshot.current_file, "demo-cube.gx")
 
+    def test_fan_hold_interval(self):
+        self.assertAlmostEqual(config.FAN_HOLD_INTERVAL, 0.7)
+
     def test_fan_hold_default_off(self):
         self.assertFalse(Snapshot().fan_hold_off)
         self.assertFalse(MockPrinterClient().snapshot.fan_hold_off)

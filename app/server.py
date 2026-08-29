@@ -329,7 +329,7 @@ def fan_hold_loop() -> None:
                 pulse_fan_hold_off(True, lambda: printer.set_fan(False))
             except (OSError, ValueError):
                 pass
-        remaining = (1.0 if holding else 0.2) - (time.monotonic() - started)
+        remaining = (config.FAN_HOLD_INTERVAL if holding else 0.2) - (time.monotonic() - started)
         stop_event.wait(max(0.05, remaining))
 
 
